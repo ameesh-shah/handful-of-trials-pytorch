@@ -1,4 +1,4 @@
-from __future__ import absolute_import
+    from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
@@ -56,6 +56,7 @@ class MBExperiment:
         self.nrollouts_per_iter = params.exp_cfg.get("nrollouts_per_iter", 1)
         self.ninit_rollouts = params.exp_cfg.get("ninit_rollouts", 1)
         self.policy = get_required_argument(params.exp_cfg, "policy", "Must provide a policy.")
+        self.explore_policy = get_required_argument(params.exp_cfg, "explore_policy", "Must provide policy for unsupervised exploration.")
 
         self.logdir = os.path.join(
             get_required_argument(params.log_cfg, "logdir", "Must provide log parent directory."),
@@ -89,11 +90,28 @@ class MBExperiment:
                 [sample["ac"] for sample in samples],
                 [sample["rewards"] for sample in samples]
             )
+        #New Training Loop for unsupervised exploration:
+        for dm_i in trange(self.ntrain_iters):
+            print("####################################################################")
+            print("Uncertainty Dynamics Ensemble: Starting training iteration %d." % (i + 1))
+
+            new_samples = []
+            for j_iter in range(max(self.neval, self.nrollouts_per_iter)):
+                #collect data
+                new_samples.append(self.agent.sample(self.task_hor, self.explore_policy))
+
+            if i < self.ntrain_iters - 1:
+                self.explore_policy.train(
+                    [sample["obs"] for sample in new_samples],
+                    [sample["ac"] for sample in new_samples],
+                    [sample["rewards"] for sample in new_samples]
+                )
+
 
         # Training loop
         for i in trange(self.ntrain_iters):
             print("####################################################################")
-            print("Starting training iteration %d." % (i + 1))
+            print("Model Predictive Controller: Starting training iteration %d." % (i + 1))
 
             iter_dir = os.path.join(self.logdir, "train_iter%d" % (i + 1))
             os.makedirs(iter_dir, exist_ok=True)

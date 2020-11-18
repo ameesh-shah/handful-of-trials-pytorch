@@ -409,3 +409,41 @@ class MPC(Controller):
         reshaped = transposed.contiguous().view(-1, dim)
 
         return reshaped
+
+class MaxEntMPC(MPC):
+    optimizers = {"CEM": CEMOptimizer}
+
+    def __init__(self, params):
+        """Creates class instance.
+            Max Entropy-based unsupervised exploration policy for pretraining phase
+        """
+        super().__init__(params)
+
+    def act(self, obs, t, get_pred_cost=False):
+        """
+        Returns the action that this controller would take at time t given observation obs.
+        Arguments:
+            obs: The current observation
+            t: The current timestep
+            get_pred_cost: If True, returns the predicted cost for the action sequence found by
+                the internal optimizer.
+
+        Returns: An action (and possibly the predicted cost)
+        """
+        #action selection will be based on computing entropies of the model
+        if not self.has_been_trained:
+            return np.random.uniform(self.ac_lb, self.ac_ub, self.ac_lb.shape)
+
+        #get prediction errors from dynamics models
+        #choose action with max prediction error
+        if self.ac_buf.shape[0] > 0:
+            action, self.ac_buf = self.ac_buf[0], self.ac_buf[1:]
+            return action
+
+        self.sy_cur_obs = obs
+
+        soln = self.optimizer.obtain_solution(self.prev_sol, self.init_var)
+        self.prev_sol = np.concatenate([np.copy(soln)[self.per * self.dU:], np.zeros(self.per * self.dU)])
+        self.ac_buf = soln[:self.per * self.dU].reshape(-1, self.dU)
+
+        return self.act(obs, t)
