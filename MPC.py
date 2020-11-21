@@ -339,7 +339,8 @@ class MPC(Controller):
         expanded = transposed[:, :, None]
         # Then, (25, 400, 1, 1)
 
-        # Each particle will select predict a diff next_obs based on the current (s,a) using one of the bootstrapped models
+        # Each particle will predict a diff next_obs based on the current (s,a) using one of the bootstrapped models
+        # default self.npart = 20
         tiled = expanded.expand(-1, -1, self.npart, -1)
         # Then, (25, 400, 20, 1)
 
@@ -350,6 +351,7 @@ class MPC(Controller):
     
     @torch.no_grad()
     def _compile_cost(self, ac_seqs):
+        # nopt = # cem samples = self.optimizer.popsize (400,)
         nopt = ac_seqs.shape[0]
         # ac_seqs shape: (plan_hors (t), nparts * n_pop [# cem samples], 1) = (25, 8000, 1)
         ac_seqs = self._prepare_acs(ac_seqs)
@@ -364,13 +366,14 @@ class MPC(Controller):
         for t in range(self.plan_hor):
             cur_acs = ac_seqs[t]
 
-            # shape: (8000, 4)
+            # shape: (nparts * popsize, obs_shape) = (8000, 4)
             next_obs = self._predict_next_obs(cur_obs, cur_acs)
             import pdb; pdb.set_trace()
 
-            # shape: (8000,)
+            # shape: (nparts * popsize,) = (8000,)
             cost = self.obs_cost_fn(next_obs) + self.ac_cost_fn(cur_acs)
-
+    
+            # shape: (popsize, npart)
             cost = cost.view(-1, self.npart)
 
             costs += cost
@@ -379,6 +382,7 @@ class MPC(Controller):
         # Replace nan with high cost
         costs[costs != costs] = 1e6
 
+        # mean of next obs across particles
         return costs.mean(dim=1).detach().cpu().numpy()
 
     def _predict_next_obs(self, obs, acs, return_mean_var=False):
@@ -455,25 +459,48 @@ class ExploreEnsembleVarianceMPC(MPC):
 
         costs = torch.zeros(nopt, self.npart, device=TORCH_DEVICE)
 
+        obs_vars = []
+        obs_means = []
+
         for t in range(self.plan_hor):
             cur_acs = ac_seqs[t]
 
-            # next_obs shape: (nparts * pop_size, obs_shape) = (8000, 4)
-            # mean, var shape: (num_nets, nparts * popsize / num_nets, obs_shape) = (5, 8000, 4)
+            # next_obs shape: (npart * pop_size, obs_shape) = (8000, 4)
+            # mean, var shape: (num_nets, npart * popsize / num_nets, obs_shape) = (5, 8000, 4)
+            # calculate variance over all bootstraps
             next_obs, (mean, var) = self._predict_next_obs(cur_obs, cur_acs, return_mean_var=True)
-            import pdb; pdb.set_trace()
+            # mean_reshape: (num_nets, npart / num_nets, popsize, obs_shape)
+            mean_reshape = mean.view(self.model.num_nets, self.npart / self.model.num_nets,
+                    nopt, self.dO)
+            # obs_mean_per_bootstrap: (num_nets, popsize, obs_shape)
+            # average next state prediction (over all particles) for each bootstrap
+            obs_mean_per_bootstrap = torch.mean(mean, dim=1)
 
-            #cost = self.obs_cost_fn(next_obs) + self.ac_cost_fn(cur_acs)
+            obs_means.append(obs_mean_per_bootstrap)
+            obs_vars.append(var)
 
-            cost = cost.view(-1, self.npart)
-
-            costs += cost
             cur_obs = self.obs_postproc2(next_obs)
 
+        # Calculate max aleatoric var for each state component
+        # obs_var: (self.plan_hor, num_net, npart * popsize / num_nets, obs_shape) -> (-1, obs_shape) 
+        obs_vars = obs_vars.view(-1, obs_shape) 
+        # w_base: (obs_shape,) 
+        w_base = torch.max(obs_vars, axis=0)
+
+        # obs_means: (self.plan_hor, num_nets, obs_shape) 
+        assert obs_means.shape == (self.plan_hor, self.model.num_nets, popsize, self.dO) 
+        # Disagreement (var) across bootstraps about the next state indicates epistemic uncertainty
+        # obs_epistemic_var: (self.plan_hor, popsize, obs_shape)
+        obs_epistemic_var = torch.var(obs_by_particle, axis=1)
+
+        # r_t reward for each timestep: (self.plan_hor, popsize)
+        r_t = (1 / self.dO) * torch.sum(torch.sqrt(obs_epistemic_var / w_base), axis=-1) 
+        # costs: (popsize,) summed cost over all timesteps for each ac seq
+        costs = -torch.sum(r_t, axis=0) 
         # Replace nan with high cost
         costs[costs != costs] = 1e6
 
-        return costs.mean(dim=1).detach().cpu().numpy()
+        return costs.detach().cpu().numpy()
 
 
 class MaxEntMPC(MPC):
