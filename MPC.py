@@ -197,7 +197,7 @@ class MPC(Controller):
         """
 
         # Construct new training points and add to training set
-        new_train_in, new_train_targs = [], []
+        (num_ensemble_nets * nparts new_train_in, new_train_targs = [], []
         for obs, acs in zip(obs_trajs, acs_trajs):
             new_train_in.append(np.concatenate([self.obs_preproc(obs[:-1]), acs], axis=-1))
             new_train_targs.append(self.targ_proc(obs[:-1], obs[1:]))
@@ -320,7 +320,7 @@ class MPC(Controller):
 
     @torch.no_grad()
     def _prepare_acs(self, ac_seqs):
-        """Reshapes acs to prepare for trajectory propagation and cost calculation."""
+        """Reshapes acs to prepare for _compile_cost."""
 
         ac_seqs = torch.from_numpy(ac_seqs).float().to(TORCH_DEVICE)
 
@@ -351,7 +351,7 @@ class MPC(Controller):
     @torch.no_grad()
     def _compile_cost(self, ac_seqs):
         nopt = ac_seqs.shape[0]
-        # ac_seqs shape: (plan_hors (t), nparts * ncem_samples, 1) = (25, 8000, 1)
+        # ac_seqs shape: (plan_hors (t), nparts * n_pop [# cem samples], 1) = (25, 8000, 1)
         ac_seqs = self._prepare_acs(ac_seqs)
 
         # Expand current observation
@@ -364,9 +364,11 @@ class MPC(Controller):
         for t in range(self.plan_hor):
             cur_acs = ac_seqs[t]
 
+            # shape: (8000, 4)
             next_obs = self._predict_next_obs(cur_obs, cur_acs)
-            import pdb; pdb.set_tracE()
+            import pdb; pdb.set_trace()
 
+            # shape: (8000,)
             cost = self.obs_cost_fn(next_obs) + self.ac_cost_fn(cur_acs)
 
             cost = cost.view(-1, self.npart)
@@ -456,9 +458,12 @@ class ExploreEnsembleVarianceMPC(MPC):
         for t in range(self.plan_hor):
             cur_acs = ac_seqs[t]
 
-            next_obs = self._predict_next_obs(cur_obs, cur_acs)
+            # next_obs shape: (nparts * pop_size, obs_shape) = (8000, 4)
+            # mean, var shape: (num_nets, nparts * popsize / num_nets, obs_shape) = (5, 8000, 4)
+            next_obs, (mean, var) = self._predict_next_obs(cur_obs, cur_acs, return_mean_var=True)
+            import pdb; pdb.set_trace()
 
-            cost = self.obs_cost_fn(next_obs) + self.ac_cost_fn(cur_acs)
+            #cost = self.obs_cost_fn(next_obs) + self.ac_cost_fn(cur_acs)
 
             cost = cost.view(-1, self.npart)
 

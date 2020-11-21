@@ -9,7 +9,7 @@ import pprint
 from dotmap import DotMap
 
 from MBExperiment import MBExperiment
-from MPC import MPC
+from MPC import MPC, ExploreEnsembleVarianceMPC
 from config import create_config
 import env # We run this so that the env is registered
 
@@ -27,7 +27,7 @@ def set_global_seeds(seed):
     np.random.seed(seed)
     random.seed(seed)
 
-    tf.compat.v1.set_random_seed(seed)
+    tf.set_random_seed(seed)
 
 
 def main(env, ctrl_type, ctrl_args, overrides, logdir):
@@ -39,6 +39,7 @@ def main(env, ctrl_type, ctrl_args, overrides, logdir):
 
     assert ctrl_type == 'MPC'
 
+    cfg.exp_cfg.exp_cfg.explore_policy = ExploreEnsembleVarianceMPC(cfg.ctrl_cfg)
     cfg.exp_cfg.exp_cfg.policy = MPC(cfg.ctrl_cfg)
     exp = MBExperiment(cfg.exp_cfg)
 

@@ -77,7 +77,7 @@ class MBExperiment:
         for i in range(self.ninit_rollouts):
             samples.append(
                 self.agent.sample(
-                    self.task_hor, self.policy
+                    self.task_hor, self.explore_policy
                 )
             )
             traj_obs.append(samples[-1]["obs"])
@@ -85,7 +85,7 @@ class MBExperiment:
             traj_rews.append(samples[-1]["rewards"])
 
         if self.ninit_rollouts > 0:
-            self.policy.train(
+            self.explore_policy.train(
                 [sample["obs"] for sample in samples],
                 [sample["ac"] for sample in samples],
                 [sample["rewards"] for sample in samples]
