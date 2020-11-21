@@ -113,6 +113,7 @@ class MPC(Controller):
         """
         super().__init__(params)
         self.dO, self.dU = params.env.observation_space.shape[0], params.env.action_space.shape[0]
+        print(f"Observation dim: {self.dO} / Action dim: {self.dU}")
         self.ac_ub, self.ac_lb = params.env.action_space.high, params.env.action_space.low
         self.ac_ub = np.minimum(self.ac_ub, params.get("ac_ub", self.ac_ub))
         self.ac_lb = np.maximum(self.ac_lb, params.get("ac_lb", self.ac_lb))
@@ -316,16 +317,19 @@ class MPC(Controller):
                 {"means": self.pred_means, "vars": self.pred_vars}
             )
             self.pred_means, self.pred_vars = [], []
-    
-    @torch.no_grad()
-    def _compile_cost(self, ac_seqs):
 
-        nopt = ac_seqs.shape[0]
+    @torch.no_grad()
+    def _prepare_acs(self, ac_seqs):
+        """Reshapes acs to prepare for trajectory propagation and cost calculation."""
 
         ac_seqs = torch.from_numpy(ac_seqs).float().to(TORCH_DEVICE)
 
         # Reshape ac_seqs so that it's amenable to parallel compute
         # Before, ac seqs has dimension (400, 25) which are pop size and sol dim coming from CEM
+        # 
+        # CEM generates `pop_size` action seqs whose reward need to evaluate (basically batch size)
+        # Each seq is `plan_hor` actions long (this is the # of actions we're decided to plan ahead, for most envs this is set to 25) 
+        # Each action in the seq has dimension `self.dU` (this is 1 for a discrete env like CartPole
         ac_seqs = ac_seqs.view(-1, self.plan_hor, self.dU)
         #  After, ac seqs has dimension (400, 25, 1)
 
@@ -335,11 +339,20 @@ class MPC(Controller):
         expanded = transposed[:, :, None]
         # Then, (25, 400, 1, 1)
 
+        # Each particle will select predict a diff next_obs based on the current (s,a) using one of the bootstrapped models
         tiled = expanded.expand(-1, -1, self.npart, -1)
         # Then, (25, 400, 20, 1)
 
         ac_seqs = tiled.contiguous().view(self.plan_hor, -1, self.dU)
         # Then, (25, 8000, 1)
+        return ac_seqs
+
+    
+    @torch.no_grad()
+    def _compile_cost(self, ac_seqs):
+        nopt = ac_seqs.shape[0]
+        # ac_seqs shape: (plan_hors (t), nparts * ncem_samples, 1) = (25, 8000, 1)
+        ac_seqs = self._prepare_acs(ac_seqs)
 
         # Expand current observation
         cur_obs = torch.from_numpy(self.sy_cur_obs).float().to(TORCH_DEVICE)
@@ -352,6 +365,7 @@ class MPC(Controller):
             cur_acs = ac_seqs[t]
 
             next_obs = self._predict_next_obs(cur_obs, cur_acs)
+            import pdb; pdb.set_tracE()
 
             cost = self.obs_cost_fn(next_obs) + self.ac_cost_fn(cur_acs)
 
@@ -365,7 +379,7 @@ class MPC(Controller):
 
         return costs.mean(dim=1).detach().cpu().numpy()
 
-    def _predict_next_obs(self, obs, acs):
+    def _predict_next_obs(self, obs, acs, return_mean_var=False):
         proc_obs = self.obs_preproc(obs)
 
         assert self.prop_mode == 'TSinf'
@@ -381,6 +395,9 @@ class MPC(Controller):
 
         # TS Optimization: Remove additional dimension
         predictions = self._flatten_to_matrix(predictions)
+
+        if return_mean_var:
+            return self.obs_postproc(obs, predictions), (mean, var)
 
         return self.obs_postproc(obs, predictions)
 
@@ -409,6 +426,50 @@ class MPC(Controller):
         reshaped = transposed.contiguous().view(-1, dim)
 
         return reshaped
+
+
+class ExploreEnsembleVarianceMPC(MPC):
+    
+    def __init__(self, params):
+        super().__init__(params)
+
+        # Override cost function to be exploration reward
+        self.optimizer.cost_function = self._compile_cost
+
+    @torch.no_grad()
+    def _compile_cost(self, ac_seqs):
+        """
+        The main MPC class uses the obs_cost_fn and ac_cost_fn from the environment.
+        Here, during the unsupervised exploration phase, we calculate our own rwd/cost.
+        """
+        print("Using subclass compile cost")
+        nopt = ac_seqs.shape[0]
+        ac_seqs = self._prepare_acs(ac_seqs)
+
+        # Expand current observation
+        cur_obs = torch.from_numpy(self.sy_cur_obs).float().to(TORCH_DEVICE)
+        cur_obs = cur_obs[None]
+        cur_obs = cur_obs.expand(nopt * self.npart, -1)
+
+        costs = torch.zeros(nopt, self.npart, device=TORCH_DEVICE)
+
+        for t in range(self.plan_hor):
+            cur_acs = ac_seqs[t]
+
+            next_obs = self._predict_next_obs(cur_obs, cur_acs)
+
+            cost = self.obs_cost_fn(next_obs) + self.ac_cost_fn(cur_acs)
+
+            cost = cost.view(-1, self.npart)
+
+            costs += cost
+            cur_obs = self.obs_postproc2(next_obs)
+
+        # Replace nan with high cost
+        costs[costs != costs] = 1e6
+
+        return costs.mean(dim=1).detach().cpu().numpy()
+
 
 class MaxEntMPC(MPC):
     optimizers = {"CEM": CEMOptimizer}
