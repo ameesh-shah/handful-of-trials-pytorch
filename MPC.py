@@ -197,7 +197,7 @@ class MPC(Controller):
         """
 
         # Construct new training points and add to training set
-        (num_ensemble_nets * nparts new_train_in, new_train_targs = [], []
+        new_train_in, new_train_targs = [], []
         for obs, acs in zip(obs_trajs, acs_trajs):
             new_train_in.append(np.concatenate([self.obs_preproc(obs[:-1]), acs], axis=-1))
             new_train_targs.append(self.targ_proc(obs[:-1], obs[1:]))
@@ -368,7 +368,6 @@ class MPC(Controller):
 
             # shape: (nparts * popsize, obs_shape) = (8000, 4)
             next_obs = self._predict_next_obs(cur_obs, cur_acs)
-            import pdb; pdb.set_trace()
 
             # shape: (nparts * popsize,) = (8000,)
             cost = self.obs_cost_fn(next_obs) + self.ac_cost_fn(cur_acs)
