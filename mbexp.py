@@ -40,6 +40,7 @@ def main(env, ctrl_type, ctrl_args, overrides, logdir):
     assert ctrl_type == 'MPC'
 
     cfg.exp_cfg.exp_cfg.policy = MPC(cfg.ctrl_cfg)
+    # cfg.exp_cfg.exp_cfg.explore_policy = MPC(cfg.ctrl_cfg) # SL: don't think we need a separate policy for exploration.
     exp = MBExperiment(cfg.exp_cfg)
 
     os.makedirs(exp.logdir)
@@ -59,6 +60,8 @@ if __name__ == "__main__":
                         help='Override default parameters, see https://github.com/kchua/handful-of-trials#overrides')
     parser.add_argument('-logdir', type=str, default='log',
                         help='Directory to which results will be logged (default: ./log)')
+    parser.add_argument('-curious', type=bool, default=False,
+                        help='If set to true, the Intrinsic Curiosity Module (ICM) will be activated.')
     args = parser.parse_args()
 
     main(args.env, "MPC", args.ctrl_arg, args.override, args.logdir)

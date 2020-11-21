@@ -56,6 +56,7 @@ class Agent:
             A.append(policy.act(O[t], t))
             times.append(time.time() - start)
 
+            # Stepping in the environment
             obs, reward, done, info = self.env.step(A[t])
 
             O.append(obs)

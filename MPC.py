@@ -287,6 +287,7 @@ class MPC(Controller):
 
         self.sy_cur_obs = obs
 
+        # Use cross entropy for planning
         soln = self.optimizer.obtain_solution(self.prev_sol, self.init_var)
         self.prev_sol = np.concatenate([np.copy(soln)[self.per * self.dU:], np.zeros(self.per * self.dU)])
         self.ac_buf = soln[:self.per * self.dU].reshape(-1, self.dU)
@@ -365,6 +366,7 @@ class MPC(Controller):
 
         return costs.mean(dim=1).detach().cpu().numpy()
 
+    # Use this function to get the next observations
     def _predict_next_obs(self, obs, acs):
         proc_obs = self.obs_preproc(obs)
 

@@ -1,4 +1,4 @@
-    from __future__ import absolute_import
+from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
@@ -11,7 +11,7 @@ from tqdm import trange
 
 from Agent import Agent
 from DotmapUtils import get_required_argument
-
+from ICM import ICM
 
 class MBExperiment:
     def __init__(self, params):
@@ -56,7 +56,10 @@ class MBExperiment:
         self.nrollouts_per_iter = params.exp_cfg.get("nrollouts_per_iter", 1)
         self.ninit_rollouts = params.exp_cfg.get("ninit_rollouts", 1)
         self.policy = get_required_argument(params.exp_cfg, "policy", "Must provide a policy.")
-        self.explore_policy = get_required_argument(params.exp_cfg, "explore_policy", "Must provide policy for unsupervised exploration.")
+        
+        # SL: This and self.policy are passed in from mbexp.py.
+        # Don't think we need a separate policy.
+        # self.explore_policy = get_required_argument(params.exp_cfg, "explore_policy", "Must provide policy for unsupervised exploration.")
 
         self.logdir = os.path.join(
             get_required_argument(params.log_cfg, "logdir", "Must provide log parent directory."),
@@ -64,6 +67,10 @@ class MBExperiment:
         )
         self.nrecord = params.log_cfg.get("nrecord", 0)
         self.neval = params.log_cfg.get("neval", 1)
+        
+        # Curiosity flag. Figure out how to pass in from command line.
+        self.enable_icm = True
+        self.icm = ICM(self.policy)
 
     def run_experiment(self):
         """Perform experiment.
@@ -72,6 +79,7 @@ class MBExperiment:
 
         traj_obs, traj_acs, traj_rets, traj_rews = [], [], [], []
 
+        # FIXME: what is the purpose of performing more than 1 initial rollout?
         # Perform initial rollouts
         samples = []
         for i in range(self.ninit_rollouts):
@@ -90,18 +98,27 @@ class MBExperiment:
                 [sample["ac"] for sample in samples],
                 [sample["rewards"] for sample in samples]
             )
-        #New Training Loop for unsupervised exploration:
+            
+        # New Training Loop for unsupervised exploration:
         for dm_i in trange(self.ntrain_iters):
             print("####################################################################")
             print("Uncertainty Dynamics Ensemble: Starting training iteration %d." % (i + 1))
 
             new_samples = []
             for j_iter in range(max(self.neval, self.nrollouts_per_iter)):
-                #collect data
-                new_samples.append(self.agent.sample(self.task_hor, self.explore_policy))
+                # Collect data with exploration in mind
+                # The CEMOptimizer should plan to optimize (r_e + r_i)
+                sample = self.agent.sample(self.task_hor, self.policy)
+                
+                # Adjust rewards by adding intrinsic rewards
+                if self.enable_icm:
+                    print("Readjusting rewards based on curiosity")
+                    sample = self.icm(sample)
+                    
+                new_samples.append(sample)
 
             if i < self.ntrain_iters - 1:
-                self.explore_policy.train(
+                self.policy.train(
                     [sample["obs"] for sample in new_samples],
                     [sample["ac"] for sample in new_samples],
                     [sample["rewards"] for sample in new_samples]

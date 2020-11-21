@@ -74,6 +74,7 @@ class CEMOptimizer(Optimizer):
             samples = X.rvs(size=[self.popsize, self.sol_dim]) * np.sqrt(constrained_var) + mean
             samples = samples.astype(np.float32)
 
+            # The cost_function (_compile_cost in MPC) queries the ensemble
             costs = self.cost_function(samples)
 
             elites = samples[np.argsort(costs)][:self.num_elites]
