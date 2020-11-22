@@ -447,7 +447,6 @@ class ExploreEnsembleVarianceMPC(MPC):
         The main MPC class uses the obs_cost_fn and ac_cost_fn from the environment.
         Here, during the unsupervised exploration phase, we calculate our own rwd/cost.
         """
-        print("Using subclass compile cost")
         nopt = ac_seqs.shape[0]
         ac_seqs = self._prepare_acs(ac_seqs)
 
@@ -465,11 +464,12 @@ class ExploreEnsembleVarianceMPC(MPC):
             cur_acs = ac_seqs[t]
 
             # next_obs shape: (npart * pop_size, obs_shape) = (8000, 4)
-            # mean, var shape: (num_nets, npart * popsize / num_nets, obs_shape) = (5, 8000, 4)
+            # mean, var shape: (num_nets, npart * popsize / num_nets, obs_shape) = (5, 1600, 4)
             # calculate variance over all bootstraps
             next_obs, (mean, var) = self._predict_next_obs(cur_obs, cur_acs, return_mean_var=True)
-            # mean_reshape: (num_nets, npart / num_nets, popsize, obs_shape)
-            mean_reshape = mean.view(self.model.num_nets, self.npart / self.model.num_nets,
+            # each of `popsize` CEM samples is a different action, so we shouldn't avg states over popsize
+            # mean: (num_nets, npart / num_nets, popsize, obs_shape)
+            mean = mean.view(self.model.num_nets, self.npart // self.model.num_nets,
                     nopt, self.dO)
             # obs_mean_per_bootstrap: (num_nets, popsize, obs_shape)
             # average next state prediction (over all particles) for each bootstrap
@@ -480,22 +480,27 @@ class ExploreEnsembleVarianceMPC(MPC):
 
             cur_obs = self.obs_postproc2(next_obs)
 
-        # Calculate max aleatoric var for each state component
-        # obs_var: (self.plan_hor, num_net, npart * popsize / num_nets, obs_shape) -> (-1, obs_shape) 
-        obs_vars = obs_vars.view(-1, obs_shape) 
+        # Calculate max aleatoric var for each state component to standardize
+        obs_vars = torch.stack(obs_vars)
+        assert obs_vars.shape == (self.plan_hor, self.model.num_nets,
+            (self.npart * nopt) // self.model.num_nets, self.dO) 
+        # obs_vars: (self.plan_hor, num_net, npart * popsize / num_nets, obs_shape) -> (-1, obs_shape) 
+        obs_vars = obs_vars.view(-1, self.dO) 
         # w_base: (obs_shape,) 
-        w_base = torch.max(obs_vars, axis=0)
+        w_base, _ = torch.max(obs_vars, dim=0)
 
-        # obs_means: (self.plan_hor, num_nets, obs_shape) 
-        assert obs_means.shape == (self.plan_hor, self.model.num_nets, popsize, self.dO) 
+        # Calculate variance over bootstrap mean predictions
+        # obs_means: (self.plan_hor, num_nets, popsize, obs_shape) 
+        obs_means = torch.stack(obs_means)
+        assert obs_means.shape == (self.plan_hor, self.model.num_nets, nopt, self.dO) 
         # Disagreement (var) across bootstraps about the next state indicates epistemic uncertainty
         # obs_epistemic_var: (self.plan_hor, popsize, obs_shape)
-        obs_epistemic_var = torch.var(obs_by_particle, axis=1)
+        obs_epistemic_var = torch.var(obs_means, dim=1)
 
         # r_t reward for each timestep: (self.plan_hor, popsize)
-        r_t = (1 / self.dO) * torch.sum(torch.sqrt(obs_epistemic_var / w_base), axis=-1) 
+        r_t = (1 / self.dO) * torch.sum(torch.sqrt(obs_epistemic_var / w_base), dim=-1) 
         # costs: (popsize,) summed cost over all timesteps for each ac seq
-        costs = -torch.sum(r_t, axis=0) 
+        costs = -torch.sum(r_t, dim=0) 
         # Replace nan with high cost
         costs[costs != costs] = 1e6
 

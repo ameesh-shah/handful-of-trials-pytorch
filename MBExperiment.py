@@ -107,6 +107,8 @@ class MBExperiment:
                     [sample["rewards"] for sample in new_samples]
                 )
 
+        self.policy.model = copy.deepcopy(self.explore_policy.model)
+        self.policy.has_been_trained = True
 
         # Training loop
         for i in trange(self.ntrain_iters):
