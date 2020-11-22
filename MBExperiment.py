@@ -8,6 +8,7 @@ from time import localtime, strftime
 from dotmap import DotMap
 from scipy.io import savemat
 from tqdm import trange
+import copy
 
 from Agent import Agent
 from DotmapUtils import get_required_argument
@@ -91,9 +92,9 @@ class MBExperiment:
                 [sample["rewards"] for sample in samples]
             )
         #New Training Loop for unsupervised exploration:
-        for dm_i in trange(self.ntrain_iters):
+        for dm_i in trange(10):
             print("####################################################################")
-            print("Uncertainty Dynamics Ensemble: Starting training iteration %d." % (i + 1))
+            print("Uncertainty Dynamics Ensemble: Starting training iteration %d." % (dm_i + 1))
 
             new_samples = []
             for j_iter in range(max(self.neval, self.nrollouts_per_iter)):
