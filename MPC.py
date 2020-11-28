@@ -14,7 +14,11 @@ from tqdm import trange
 
 import torch
 
+from rnd_model import RNDModel
+
 TORCH_DEVICE = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+
+import pytorch_util as ptu
 
 
 class Controller:
@@ -182,6 +186,11 @@ class MPC(Controller):
         self.model = get_required_argument(
             params.prop_cfg.model_init_cfg, "model_constructor", "Must provide a model constructor."
         )(params.prop_cfg.model_init_cfg)
+
+	# Set up exploration model
+        self.exploration_enabled = True
+        self.exploration_model = RNDModel(ob_dim=self.dO)
+        self.gamma = 1e-2
 
     def train(self, obs_trajs, acs_trajs, rews_trajs):
         """Trains the internal model of this controller. Once trained,
@@ -355,6 +364,25 @@ class MPC(Controller):
 
             cost = self.obs_cost_fn(next_obs) + self.ac_cost_fn(cur_acs)
 
+            # FIXME: add exploreation bonus
+            # FIXME: minimize cost to maximize reward
+            if (self.exploration_enabled) :            
+                print('======= Cost Before =======')
+                print(type(cost))
+                print(cost)
+                
+                expl_bonus = self.gamma * self._get_expl_bonus(next_obs)
+
+                print('======= Expl Bonus  =======')
+                print(type(expl_bonus))
+                print(expl_bonus)
+
+                cost = cost - expl_bonus
+
+                print('======= Cost After  =======')
+                print(type(cost))
+                print(cost)
+ 
             cost = cost.view(-1, self.npart)
 
             costs += cost
@@ -409,6 +437,17 @@ class MPC(Controller):
         reshaped = transposed.contiguous().view(-1, dim)
 
         return reshaped
+
+    def _get_expl_bonus(self, next_obs):
+        """
+        print('***********')
+        print('next_obs type: ' + str(type(next_obs)))
+        print(next_obs)
+        """
+        expl_bonus = self.exploration_model(next_obs).detach()
+        self.exploration_model.update(next_obs)
+        print('Exploration bonus: ' + str(expl_bonus))
+        return expl_bonus
 
 class MaxEntMPC(MPC):
     optimizers = {"CEM": CEMOptimizer}
