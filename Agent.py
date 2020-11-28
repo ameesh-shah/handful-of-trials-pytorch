@@ -6,6 +6,7 @@ import time
 
 import numpy as np
 from dotmap import DotMap
+from tqdm import trange
 #from gym.monitoring import VideoRecorder
 
 
@@ -49,7 +50,7 @@ class Agent:
         O, A, reward_sum, done = [self.env.reset()], [], 0, False
 
         policy.reset()
-        for t in range(horizon):
+        for t in trange(horizon):
             if video_record:
                 recorder.capture_frame()
             start = time.time()

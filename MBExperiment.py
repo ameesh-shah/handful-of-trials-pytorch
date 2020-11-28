@@ -29,6 +29,7 @@ class MBExperiment:
                         will be added.
 
                 .exp_cfg:
+                    .nexplore_iters (int): Number of unsupervised exploration iterations to be performed.
                     .ntrain_iters (int): Number of training iterations to be performed.
                     .nrollouts_per_iter (int): (optional) Number of rollouts done between training
                         iterations. Defaults to 1.
@@ -51,6 +52,10 @@ class MBExperiment:
         self.task_hor = get_required_argument(params.sim_cfg, "task_hor", "Must provide task horizon.")
         self.agent = Agent(DotMap(env=self.env, noisy_actions=False))
 
+        self.nexplore_iters = get_required_argument(
+            params.exp_cfg, "nexplore_iters", "Must provide number of exploration iterations."
+        )
+
         self.ntrain_iters = get_required_argument(
             params.exp_cfg, "ntrain_iters", "Must provide number of training iterations."
         )
@@ -61,8 +66,9 @@ class MBExperiment:
 
         self.logdir = os.path.join(
             get_required_argument(params.log_cfg, "logdir", "Must provide log parent directory."),
-            strftime("%Y-%m-%d--%H:%M:%S", localtime())
+            params.log_cfg.get("expname", "") + strftime("%Y-%m-%d--%H:%M:%S", localtime()) 
         )
+        print("Logging to: ", self.logdir)
         self.nrecord = params.log_cfg.get("nrecord", 0)
         self.neval = params.log_cfg.get("neval", 1)
 
@@ -85,23 +91,28 @@ class MBExperiment:
             traj_acs.append(samples[-1]["ac"])
             traj_rews.append(samples[-1]["rewards"])
 
+        print("Training with initial rollouts ", self.ninit_rollouts)
         if self.ninit_rollouts > 0:
             self.explore_policy.train(
                 [sample["obs"] for sample in samples],
                 [sample["ac"] for sample in samples],
                 [sample["rewards"] for sample in samples]
             )
-        #New Training Loop for unsupervised exploration:
-        for dm_i in trange(10):
+
+        print("starting")
+
+        # Train the explore policy with the exploration reward
+        for dm_i in trange(self.nexplore_iters):
             print("####################################################################")
             print("Uncertainty Dynamics Ensemble: Starting training iteration %d." % (dm_i + 1))
 
             new_samples = []
             for j_iter in range(max(self.neval, self.nrollouts_per_iter)):
+                print("sampling")
                 #collect data
                 new_samples.append(self.agent.sample(self.task_hor, self.explore_policy))
 
-            if i < self.ntrain_iters - 1:
+            if dm_i < self.nexplore_iters - 1:
                 self.explore_policy.train(
                     [sample["obs"] for sample in new_samples],
                     [sample["ac"] for sample in new_samples],

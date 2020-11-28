@@ -7,7 +7,7 @@ import os
 import importlib
 
 
-def create_config(env_name, ctrl_type, ctrl_args, overrides, logdir):
+def create_config(env_name, ctrl_type, ctrl_args, overrides, logdir, expname):
     cfg = DotMap()
     type_map = DotMap(
         exp_cfg=DotMap(
@@ -17,6 +17,7 @@ def create_config(env_name, ctrl_type, ctrl_args, overrides, logdir):
                 noise_std=float
             ),
             exp_cfg=DotMap(
+                nexplore_iters=int,
                 ntrain_iters=int,
                 nrollouts_per_iter=int,
                 ninit_rollouts=int
@@ -55,20 +56,22 @@ def create_config(env_name, ctrl_type, ctrl_args, overrides, logdir):
 
     # cfg_module by here is an instance of <env>ConfigModule
 
-    _create_exp_config(cfg.exp_cfg, cfg_module, logdir, type_map)
+    _create_exp_config(cfg.exp_cfg, cfg_module, logdir, expname, type_map)
     _create_ctrl_config(cfg.ctrl_cfg, cfg_module, ctrl_type, ctrl_args, type_map)
 
     return cfg
 
 
-def _create_exp_config(exp_cfg, cfg_module, logdir, type_map):
+def _create_exp_config(exp_cfg, cfg_module, logdir, expname, type_map):
     exp_cfg.sim_cfg.env = cfg_module.ENV
     exp_cfg.sim_cfg.task_hor = cfg_module.TASK_HORIZON
 
     exp_cfg.exp_cfg.ntrain_iters = cfg_module.NTRAIN_ITERS
+    exp_cfg.exp_cfg.nexplore_iters = cfg_module.NEXPLORE_ITERS
     exp_cfg.exp_cfg.nrollouts_per_iter = cfg_module.NROLLOUTS_PER_ITER
 
     exp_cfg.log_cfg.logdir = logdir
+    exp_cfg.log_cfg.expname = expname
 
 
 def _create_ctrl_config(ctrl_cfg, cfg_module, ctrl_type, ctrl_args, type_map):

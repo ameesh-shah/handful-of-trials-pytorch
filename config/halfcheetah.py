@@ -95,7 +95,9 @@ class PtModel(nn.Module):
 class HalfCheetahConfigModule:
     ENV_NAME = "MBRLHalfCheetah-v0"
     TASK_HORIZON = 1000
-    NTRAIN_ITERS = 300
+#    NTRAIN_ITERS = 300
+    NTRAIN_ITERS = 10
+    NEXPLORE_ITERS = 0
     NROLLOUTS_PER_ITER = 1
     PLAN_HOR = 30
     MODEL_IN, MODEL_OUT = 24, 18
